@@ -1,5 +1,5 @@
-// Popup boîtier AirPods — haut-droite, glisse depuis le haut, draggable.
-// Wayland : si le positionnement est ignoré par le compositeur, lancer avec
+// AirPods case lid popup — top-right corner, slides in from the top, draggable.
+// Wayland: if the compositor ignores window positioning, run with
 //   QT_QPA_PLATFORM=xcb librepods
 import QtQuick 2.15
 import QtQuick.Controls 2.15
@@ -22,10 +22,11 @@ Window {
     width:  320
     height: 185
 
-    function showPopup() {
-        var sc = Qt.application.screens[0]
-        popupWindow.x = Math.round(sc.width  - popupWindow.width  - 16)
-        popupWindow.y = 16
+    function showPopup(targetScreen) {
+        var sc = targetScreen ? targetScreen : Qt.application.screens[0]
+        popupWindow.screen = sc
+        popupWindow.x = Math.round(sc.virtualX + sc.width - popupWindow.width - 16)
+        popupWindow.y = sc.virtualY + 16
         popupWindow.opacity = 1
         popupWindow.show()
         popupWindow.raise()
@@ -35,7 +36,7 @@ Window {
         timerBar.restartBar()
     }
 
-    // Ombre douce
+    // Soft shadow
     Rectangle {
         anchors.fill:      card
         anchors.margins:   -6
@@ -47,7 +48,7 @@ Window {
         opacity:  card.opacity
     }
 
-    // Carte principale
+    // Main card
     Rectangle {
         id: card
         width:  parent.width  - 20
@@ -63,7 +64,7 @@ Window {
             onActiveChanged: if (active) popupWindow.startSystemMove()
         }
 
-        // Glisse depuis le haut
+        // Slide in from the top
         NumberAnimation {
             id: slideIn
             target: card; property: "y"
@@ -71,7 +72,7 @@ Window {
             easing.type: Easing.OutBack; easing.overshoot: 0.5
         }
 
-        // Contenu
+        // Content
         Column {
             anchors.left:    parent.left
             anchors.right:   parent.right
@@ -79,13 +80,13 @@ Window {
             anchors.margins: 14
             spacing: 10
 
-            // Header : image + nom du modèle + bouton ×
+            // Header: image + model name + × button
             Item {
                 anchors.left:  parent.left
                 anchors.right: parent.right
                 height: 36
 
-                // Image du modèle (si disponible)
+                // Model image (if available)
                 Image {
                     id: podImg
                     source:   popupWindow.podImageSource
@@ -97,7 +98,7 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                // Nom du modèle
+                // Model name
                 Text {
                     anchors.left:           podImg.visible ? podImg.right : parent.left
                     anchors.leftMargin:     podImg.visible ? 8 : 0
@@ -112,7 +113,7 @@ Window {
                     elide:          Text.ElideRight
                 }
 
-                // Bouton fermer
+                // Close button
                 RoundButton {
                     id: closeBtn
                     anchors.right:          parent.right
@@ -133,7 +134,7 @@ Window {
                 }
             }
 
-            // Trois anneaux de batterie
+            // Three battery rings
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 12
@@ -156,7 +157,7 @@ Window {
             }
         }
 
-        // Barre de progression auto-close (en bas de la carte)
+        // Auto-close progress bar (bottom of the card)
         Rectangle {
             id: timerBar
             anchors.bottom:      parent.bottom
@@ -184,7 +185,7 @@ Window {
             }
         }
 
-        // Hover → pause du timer
+        // Hover → pause the timer
         HoverHandler {
             id: cardHover
             onHoveredChanged: {
@@ -198,11 +199,10 @@ Window {
             }
         }
 
-        // Clic sur fond pour fermer
-        MouseArea {
-            anchors.fill: parent
-            onClicked: fadeOut.start()
-            z: 1
+        // Click on the card to close (a TapHandler, unlike a MouseArea, does not
+        // grab the press, so the DragHandler above can still move the window)
+        TapHandler {
+            onTapped: fadeOut.start()
         }
     }
 

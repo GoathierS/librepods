@@ -103,12 +103,14 @@ BleManager::~BleManager()
 void BleManager::startScan()
 {
     LOG_DEBUG("Starting BLE scan...");
+    m_scanRequested = true;
     discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
 void BleManager::stopScan()
 {
     LOG_DEBUG("Stopping BLE scan...");
+    m_scanRequested = false;
     discoveryAgent->stop();
 }
 
@@ -119,8 +121,10 @@ bool BleManager::isScanning() const
 
 void BleManager::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 {
-    // Ignore les appareils trop lointains (RSSI < -60 dBm signifie > ~10 m)
-    if (info.rssi() != 0 && info.rssi() < -60) return;
+    // Ignore very weak signals (devices several rooms away)
+    if (info.rssi() != 0 && info.rssi() < -80) return;
+
+    m_retryDelayMs = 5000; // scan is healthy again, reset error backoff
 
     // Check for Apple's manufacturer ID (0x004C)
     if (info.manufacturerData().contains(0x004C))
@@ -220,14 +224,26 @@ void BleManager::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 
 void BleManager::onScanFinished()
 {
-    // Relance systématiquement (timeout=0 ne devrait pas finir, mais au cas où)
-    discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    // With a timeout of 0 the scan should never finish; restart it if it does
+    // unexpectedly, unless it was stopped on purpose.
+    if (m_scanRequested && !discoveryAgent->isActive())
+    {
+        discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    }
 }
 
 void BleManager::onErrorOccurred(QBluetoothDeviceDiscoveryAgent::Error error)
 {
     LOG_ERROR("BLE scan error occurred:" << error);
-    stopScan();
-    // Relance après 5 s pour récupérer des erreurs transitoires
-    QTimer::singleShot(5000, this, [this]() { startScan(); });
+    discoveryAgent->stop();
+    if (!m_scanRequested || error == QBluetoothDeviceDiscoveryAgent::PoweredOffError)
+        return;
+
+    // Retry transient errors with exponential backoff (5 s up to 60 s), unless
+    // the scan was stopped on purpose in the meantime
+    QTimer::singleShot(m_retryDelayMs, this, [this]() {
+        if (m_scanRequested && !discoveryAgent->isActive())
+            discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    });
+    m_retryDelayMs = qMin(m_retryDelayMs * 2, 60000);
 }

@@ -84,6 +84,8 @@ signals:
 
 private:
     QBluetoothDeviceDiscoveryAgent *discoveryAgent;
+    bool m_scanRequested = false;
+    int m_retryDelayMs = 5000;
 };
 
 #endif // BLEMANAGER_H

@@ -17,13 +17,20 @@ ApplicationWindow {
         NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
     }
 
-    // Mémorisation de position : restaure depuis C++ au démarrage, sauve à chaque déplacement
+    // Window position: restored from C++ QSettings on startup, saved after moving
     Component.onCompleted: {
         var pos = airPodsTrayApp.savedWindowPos()
         if (pos.x !== -1) { mainWindow.x = pos.x; mainWindow.y = pos.y }
     }
-    onXChanged: airPodsTrayApp.saveWindowPos(mainWindow.x, mainWindow.y)
-    onYChanged: airPodsTrayApp.saveWindowPos(mainWindow.x, mainWindow.y)
+    onXChanged: savePosTimer.restart()
+    onYChanged: savePosTimer.restart()
+
+    // Debounce: persist the position once the window has stopped moving
+    Timer {
+        id: savePosTimer
+        interval: 500
+        onTriggered: airPodsTrayApp.saveWindowPos(mainWindow.x, mainWindow.y)
+    }
 
     palette.window:          "#1C1C1E"
     palette.base:            "#2C2C2E"
@@ -37,7 +44,11 @@ ApplicationWindow {
 
     onClosing: mainWindow.visible = false
 
-    Keys.onEscapePressed: mainWindow.visible = false
+    // Keys cannot be attached to a Window, use a Shortcut instead
+    Shortcut {
+        sequence: "Escape"
+        onActivated: mainWindow.visible = false
+    }
 
     function reopen(pageToLoad) {
         if (pageToLoad === "settings") {
@@ -67,7 +78,7 @@ ApplicationWindow {
         source: "qrc:/icons/assets/fonts/SF-Symbols-6.ttf"
     }
 
-    // Ombre portée
+    // Drop shadow
     Rectangle {
         anchors.fill:      mainCard
         anchors.margins:   -10
@@ -92,7 +103,7 @@ ApplicationWindow {
                               easing.type: Easing.OutBack; easing.overshoot: 0.35 }
         }
 
-        // ── Header fixe (hors StackView → drag toujours fonctionnel) ─────────
+        // ── Fixed header (outside StackView so dragging always works) ───────
         Item {
             id: fixedHeader
             anchors.top:   parent.top
@@ -100,13 +111,13 @@ ApplicationWindow {
             anchors.right: parent.right
             height: 52
 
-            // Drag via startSystemMove (fonctionne X11 et Wayland avec xdg-decoration)
+            // Drag via startSystemMove (works on X11 and Wayland)
             DragHandler {
                 target: null
                 onActiveChanged: if (active) mainWindow.startSystemMove()
             }
 
-            // Bouton gauche : × en mode main, ← en mode settings
+            // Left button: × on main page, ← on settings page
             RoundButton {
                 anchors.left:           parent.left
                 anchors.leftMargin:     12
@@ -130,7 +141,7 @@ ApplicationWindow {
                 }
             }
 
-            // Titre (nom de l'appareil ou page courante)
+            // Title (device name or current page)
             Text {
                 anchors.centerIn: parent
                 text: stackView.depth > 1
@@ -144,7 +155,7 @@ ApplicationWindow {
                 font.family:    "Inter"
             }
 
-            // Bouton ⚙ (main seulement)
+            // ⚙ button (main page only)
             RoundButton {
                 visible: stackView.depth === 1
                 anchors.right:          parent.right
@@ -199,14 +210,14 @@ ApplicationWindow {
         }
     }
 
-    // Navigation souris (bouton retour)
+    // Mouse navigation (back button)
     MouseArea {
         anchors.fill:    parent
         acceptedButtons: Qt.BackButton | Qt.ForwardButton
         onClicked: mouse => { if (mouse.button === Qt.BackButton && stackView.depth > 1) stackView.pop() }
     }
 
-    // Popup boîtier
+    // Case lid popup
     Loader {
         id: casePopupLoader
         source: "CaseOpenPopup.qml"
@@ -224,15 +235,15 @@ ApplicationWindow {
             p.leftBattery      = airPodsTrayApp.bleLidLeftBattery
             p.rightBattery     = airPodsTrayApp.bleLidRightBattery
             p.caseBatteryLevel = airPodsTrayApp.bleLidCaseBattery
-            p.leftCharging     = false
-            p.rightCharging    = false
-            p.caseCharging     = false
-            p.showPopup()
+            p.leftCharging     = airPodsTrayApp.bleLidLeftCharging
+            p.rightCharging    = airPodsTrayApp.bleLidRightCharging
+            p.caseCharging     = airPodsTrayApp.bleLidCaseCharging
+            p.showPopup(mainWindow.screen)
         }
     }
 
     // =========================================================================
-    // PAGE PRINCIPALE
+    // MAIN PAGE
     // =========================================================================
     Component {
         id: mainComp
@@ -249,14 +260,14 @@ ApplicationWindow {
                     topPadding: 8
                     bottomPadding: 16
 
-                    // État de connexion
+                    // Connection state
                     Item {
                         visible: !airPodsTrayApp.airpodsConnected
                         anchors.horizontalCenter: parent.horizontalCenter
                         width:  elsewhereRow.visible ? elsewhereRow.width : disconnectedPill.width
                         height: 26
 
-                        // Pastille "Non connecté"
+                        // "Not connected" badge
                         Rectangle {
                             id: disconnectedPill
                             visible: !airPodsTrayApp.bleAirPodsElsewhere
@@ -273,7 +284,7 @@ ApplicationWindow {
                             }
                         }
 
-                        // Pastille "Connecté ailleurs" + bouton Reprendre
+                        // "In use elsewhere" badge + Take Over button
                         Row {
                             id: elsewhereRow
                             visible: airPodsTrayApp.bleAirPodsElsewhere
@@ -316,7 +327,7 @@ ApplicationWindow {
                         }
                     }
 
-                    // Images + anneaux de batterie (PodColumn = image + ring)
+                    // Images + battery rings (PodColumn = image + ring)
                     Row {
                         anchors.horizontalCenter: parent.horizontalCenter
                         spacing: 8
@@ -355,7 +366,7 @@ ApplicationWindow {
                         }
                     }
 
-                    // Carte contrôle du bruit
+                    // Noise control card
                     Rectangle {
                         visible: airPodsTrayApp.airpodsConnected
                         anchors.left:        parent.left
@@ -398,7 +409,7 @@ ApplicationWindow {
                                 }
                             }
 
-                            // Slider niveau adaptatif
+                            // Adaptive level slider
                             Column {
                                 anchors.left:  parent.left
                                 anchors.right: parent.right
@@ -461,7 +472,7 @@ ApplicationWindow {
                         }
                     }
 
-                    // Carte options
+                    // Options card
                     Rectangle {
                         visible: airPodsTrayApp.airpodsConnected
                         anchors.left:        parent.left
@@ -518,7 +529,7 @@ ApplicationWindow {
     }
 
     // =========================================================================
-    // PAGE PARAMÈTRES
+    // SETTINGS PAGE
     // =========================================================================
     Component {
         id: settingsComp
@@ -709,7 +720,7 @@ ApplicationWindow {
                         }
                     }
 
-                    // DEVICE (si connecté)
+                    // DEVICE (when connected)
                     Text {
                         visible: airPodsTrayApp.airpodsConnected
                         anchors.left:       parent.left

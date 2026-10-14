@@ -17,7 +17,6 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QDateTime>
-#include <QMap>
 
 #include "airpods_packets.h"
 #include "logger.h"
@@ -49,11 +48,14 @@ class AirPodsTrayApp : public QObject {
     Q_PROPERTY(DeviceInfo *deviceInfo READ deviceInfo CONSTANT)
     Q_PROPERTY(QString phoneMacStatus READ phoneMacStatus NOTIFY phoneMacStatusChanged)
     Q_PROPERTY(bool hearingAidEnabled READ hearingAidEnabled WRITE setHearingAidEnabled NOTIFY hearingAidEnabledChanged)
-    // ── Popup boîtier ──────────────────────────────────────────────────────
+    // ── Case lid popup ─────────────────────────────────────────────────────
     Q_PROPERTY(bool showCasePopupEnabled READ showCasePopupEnabled WRITE setShowCasePopupEnabled NOTIFY showCasePopupEnabledChanged)
     Q_PROPERTY(int bleLidLeftBattery   READ bleLidLeftBattery   NOTIFY caseLidOpened)
     Q_PROPERTY(int bleLidRightBattery  READ bleLidRightBattery  NOTIFY caseLidOpened)
     Q_PROPERTY(int bleLidCaseBattery   READ bleLidCaseBattery   NOTIFY caseLidOpened)
+    Q_PROPERTY(bool bleLidLeftCharging  READ bleLidLeftCharging  NOTIFY caseLidOpened)
+    Q_PROPERTY(bool bleLidRightCharging READ bleLidRightCharging NOTIFY caseLidOpened)
+    Q_PROPERTY(bool bleLidCaseCharging  READ bleLidCaseCharging  NOTIFY caseLidOpened)
     Q_PROPERTY(QString bleLidModelName READ bleLidModelName     NOTIFY caseLidOpened)
     Q_PROPERTY(QString bleLidPodIcon   READ bleLidPodIcon       NOTIFY caseLidOpened)
     // ── Auto-switch ────────────────────────────────────────────────────────────
@@ -151,7 +153,7 @@ public:
     DeviceInfo *deviceInfo() const { return m_deviceInfo; }
     QString phoneMacStatus() const { return m_phoneMacStatus; }
     bool hearingAidEnabled() const { return m_deviceInfo->hearingAidEnabled(); }
-    // ── Popup boîtier ──────────────────────────────────────────────────────
+    // ── Case lid popup ─────────────────────────────────────────────────────
     bool showCasePopupEnabled() const { return m_showCasePopupEnabled; }
     void setShowCasePopupEnabled(bool en) {
         if (m_showCasePopupEnabled == en) return;
@@ -162,6 +164,9 @@ public:
     int     bleLidLeftBattery()  const { return m_bleLidLeftBattery; }
     int     bleLidRightBattery() const { return m_bleLidRightBattery; }
     int     bleLidCaseBattery()  const { return m_bleLidCaseBattery; }
+    bool    bleLidLeftCharging()  const { return m_bleLidLeftCharging; }
+    bool    bleLidRightCharging() const { return m_bleLidRightCharging; }
+    bool    bleLidCaseCharging()  const { return m_bleLidCaseCharging; }
     QString bleLidModelName()    const { return m_bleLidModelName; }
     QString bleLidPodIcon()      const { return m_bleLidPodIcon; }
     // ── Auto-switch ────────────────────────────────────────────────────────────
@@ -932,68 +937,63 @@ private slots:
 
     void bleDeviceFound(const BleInfo &device)
     {
-        // Log brut du paquet pour faciliter le débogage du décodage
-        qDebug() << "[BLE raw]" << device.address << "data:" << device.rawData.toHex()
-                 << "lid:" << static_cast<int>(device.lidState)
-                 << "rssi: (filtered upstream)";
+        // Only react to our own AirPods (resolvable private address matching our IRK)
+        if (!BLEUtils::isValidIrkRpa(m_deviceInfo->magicAccIRK(), device.address))
+            return;
 
-        if (BLEUtils::isValidIrkRpa(m_deviceInfo->magicAccIRK(), device.address)) {
-            m_deviceInfo->setModel(device.modelName);
-            auto decryptet = BLEUtils::decryptLastBytes(device.encryptedPayload, m_deviceInfo->magicAccEncKey());
-            m_deviceInfo->getBattery()->parseEncryptedPacket(decryptet, device.primaryLeft, device.isThisPodInTheCase, isModelHeadset(m_deviceInfo->model()));
-            m_deviceInfo->getEarDetection()->overrideEarDetectionStatus(device.isPrimaryInEar, device.isSecondaryInEar);
+        m_deviceInfo->setModel(device.modelName);
+        auto decryptet = BLEUtils::decryptLastBytes(device.encryptedPayload, m_deviceInfo->magicAccEncKey());
+        m_deviceInfo->getBattery()->parseEncryptedPacket(decryptet, device.primaryLeft, device.isThisPodInTheCase, isModelHeadset(m_deviceInfo->model()));
+        m_deviceInfo->getEarDetection()->overrideEarDetectionStatus(device.isPrimaryInEar, device.isSecondaryInEar);
+
+        // ── "AirPods in use on another device" detection ──────────────────────
+        bool elsewhere = !areAirpodsConnected() &&
+                         (device.connectionState == BleInfo::ConnectionState::MUSIC ||
+                          device.connectionState == BleInfo::ConnectionState::CALL  ||
+                          device.connectionState == BleInfo::ConnectionState::RINGING);
+        if (elsewhere != m_bleAirPodsElsewhere) {
+            m_bleAirPodsElsewhere = elsewhere;
+            emit bleAirPodsElsewhereChanged();
+            LOG_INFO("AirPods elsewhere state:" << elsewhere);
         }
 
-        // ── Détection "AirPods connectés ailleurs" ─────────────────────────
-        // Seulement pour nos propres AirPods (IRK connu ou adresse BT déjà connue)
-        bool isOurDevice = BLEUtils::isValidIrkRpa(m_deviceInfo->magicAccIRK(), device.address)
-                        || (!m_deviceInfo->bluetoothAddress().isEmpty()
-                            && device.rawData.size() >= 4);  // fallback: même modèle connu
-        if (isOurDevice && !areAirpodsConnected()) {
-            bool elsewhere = (device.connectionState == BleInfo::ConnectionState::MUSIC  ||
-                              device.connectionState == BleInfo::ConnectionState::CALL   ||
-                              device.connectionState == BleInfo::ConnectionState::RINGING);
-            if (elsewhere != m_bleAirPodsElsewhere) {
-                m_bleAirPodsElsewhere = elsewhere;
-                emit bleAirPodsElsewhereChanged();
-                LOG_INFO("AirPods elsewhere state:" << elsewhere);
-            }
-            if (m_autoSwitchEnabled && m_mediaPlaying && !m_bleAirPodsElsewhere) {
+        // ── Auto-switch: grab the AirPods while Linux is playing ─────────────
+        // connectToAirPods() runs a blocking bluetoothctl call, so rate-limit attempts
+        if (m_autoSwitchEnabled && m_mediaPlaying && !areAirpodsConnected() && !m_bleAirPodsElsewhere) {
+            const QDateTime now = QDateTime::currentDateTime();
+            if (!m_lastAutoSwitchAttempt.isValid() || m_lastAutoSwitchAttempt.secsTo(now) >= 15) {
+                m_lastAutoSwitchAttempt = now;
+                LOG_INFO("Auto-switch: media playing and AirPods available, connecting");
                 connectToAirPods(true);
             }
-        } else if (areAirpodsConnected() && m_bleAirPodsElsewhere) {
-            m_bleAirPodsElsewhere = false;
-            emit bleAirPodsElsewhereChanged();
         }
 
-        // ── Détection ouverture boîtier pour popup ──────────────────────────
+        // ── Case lid opened popup ─────────────────────────────────────────────
         if (m_showCasePopupEnabled && device.lidState != BleInfo::LidState::UNKNOWN) {
-            const QString key = device.address;
             if (device.lidState == BleInfo::LidState::OPEN) {
-                if (!m_previousLidOpen.value(key, false)) {
-                    QDateTime now = QDateTime::currentDateTime();
+                if (!m_previousLidOpen) {
+                    const QDateTime now = QDateTime::currentDateTime();
                     if (!m_lastPopupTime.isValid() || m_lastPopupTime.secsTo(now) >= 10) {
-                        m_lastPopupTime      = now;
-                        m_bleLidLeftBattery  = device.leftPodBattery;
-                        m_bleLidRightBattery = device.rightPodBattery;
-                        m_bleLidCaseBattery  = device.caseBattery;
-                        m_bleLidModelName    = airpodsModelDisplayName(device.modelName);
-                        m_bleLidPodIcon      = getModelIcon(device.modelName).first;
-                        qDebug() << "[LidOpen] modèle:" << m_bleLidModelName
-                                 << "L:" << m_bleLidLeftBattery
-                                 << "R:" << m_bleLidRightBattery
-                                 << "Case:" << m_bleLidCaseBattery;
+                        m_lastPopupTime       = now;
+                        m_bleLidLeftBattery   = device.leftPodBattery;
+                        m_bleLidRightBattery  = device.rightPodBattery;
+                        m_bleLidCaseBattery   = device.caseBattery;
+                        m_bleLidLeftCharging  = device.leftCharging;
+                        m_bleLidRightCharging = device.rightCharging;
+                        m_bleLidCaseCharging  = device.caseCharging;
+                        m_bleLidModelName     = airpodsModelDisplayName(device.modelName);
+                        m_bleLidPodIcon       = getModelIcon(device.modelName).first;
+                        LOG_DEBUG("Case lid opened:" << m_bleLidModelName);
                         emit caseLidOpened();
                     }
                 }
-                m_previousLidOpen[key] = true;
+                m_previousLidOpen = true;
             } else if (device.lidState == BleInfo::LidState::CLOSED) {
-                m_previousLidOpen[key] = false;
+                m_previousLidOpen = false;
             }
         }
     }
 
-    // Nom d'affichage du modèle
     static QString airpodsModelDisplayName(AirPodsModel model) {
         switch (model) {
         case AirPodsModel::AirPods1:            return QStringLiteral("AirPods (1st gen)");
@@ -1014,12 +1014,9 @@ public:
     void handleMediaStateChange(MediaController::MediaState state) {
         m_mediaPlaying = (state == MediaController::MediaState::Playing);
         if (m_mediaPlaying) {
-            LOG_INFO("Media started playing");
+            LOG_INFO("Media started playing, sending disconnect request to Android and taking over audio");
             sendDisconnectRequestToAndroid();
-            if (m_autoSwitchEnabled || CrossDevice.isEnabled) {
-                LOG_INFO("Auto-switch enabled — attempting to take over AirPods");
-                connectToAirPods(true);
-            }
+            connectToAirPods(true);
         }
     }
 
@@ -1099,7 +1096,7 @@ signals:
     void oneBudANCModeChanged(bool enabled);
     void phoneMacStatusChanged();
     void hearingAidEnabledChanged(bool enabled);
-    // ── Popup boîtier ──────────────────────────────────────────────────────
+    // ── Case lid popup ─────────────────────────────────────────────────────
     void showCasePopupEnabledChanged(bool enabled);
     void caseLidOpened();
     void autoSwitchEnabledChanged(bool enabled);
@@ -1121,19 +1118,23 @@ private:
     BleManager *m_bleManager;
     SystemSleepMonitor *m_systemSleepMonitor = nullptr;
     QString m_phoneMacStatus;
-    // ── Popup boîtier ──────────────────────────────────────────────────────
+    // ── Case lid popup ─────────────────────────────────────────────────────
     bool m_showCasePopupEnabled = true;
-    QMap<QString, bool> m_previousLidOpen;
+    bool m_previousLidOpen = false;
     QDateTime m_lastPopupTime;
     int m_bleLidLeftBattery  = -1;
     int m_bleLidRightBattery = -1;
     int m_bleLidCaseBattery  = -1;
+    bool m_bleLidLeftCharging  = false;
+    bool m_bleLidRightCharging = false;
+    bool m_bleLidCaseCharging  = false;
     QString m_bleLidModelName;
     QString m_bleLidPodIcon;
     // ── Auto-switch ────────────────────────────────────────────────────────────
     bool m_autoSwitchEnabled    = false;
     bool m_bleAirPodsElsewhere  = false;
     bool m_mediaPlaying         = false;
+    QDateTime m_lastAutoSwitchAttempt;
 };
 
 int main(int argc, char *argv[]) {

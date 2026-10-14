@@ -1,13 +1,13 @@
 import QtQuick 2.15
 
-// Colonne icône + anneau de batterie pour un écouteur ou le boîtier.
+// Icon + battery ring column for one earbud or the case.
 Column {
     id: root
     property bool   inEar:      true
     property string iconSource: ""
     property int    batteryLevel: 0
     property bool   isCharging:   false
-    property string indicator:    ""   // "L", "R" ou "" pour le boîtier
+    property string indicator:    ""   // "L", "R" or "" for the case
 
     readonly property real targetOpacity: inEar ? 1.0 : 0.5
 
@@ -32,7 +32,7 @@ Column {
     BatteryRing {
         batteryLevel: root.batteryLevel
         isCharging:   root.isCharging
-        label:        root.indicator   // "L", "R" ou "" → "Case"
+        label:        root.indicator   // "L", "R" or "" → "Case"
         anchors.horizontalCenter: parent.horizontalCenter
     }
 }

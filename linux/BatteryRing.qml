@@ -70,7 +70,7 @@ Item {
         }
     }
 
-    // ── Centre : pourcentage ou éclair ────────────────────────────────────────
+    // ── Centre: percentage or bolt ────────────────────────────────────────────
     Text {
         anchors.centerIn: bgRing
         text: root.isCharging ? "⚡" : (root.unknown ? "—" : (root.batteryLevel + "%"))
@@ -80,7 +80,7 @@ Item {
         font.family: "Inter"
     }
 
-    // ── Étiquette L / R / Case / Headset ─────────────────────────────────────
+    // ── Label L / R / Case / Headset ─────────────────────────────────────────
     Text {
         anchors.top: bgRing.bottom
         anchors.topMargin: 5
@@ -95,7 +95,7 @@ Item {
         font.family: "Inter"
     }
 
-    // ── Mises à jour ──────────────────────────────────────────────────────────
+    // ── Updates ───────────────────────────────────────────────────────────────
     onBatteryLevelChanged: progressRing.progress = root.unknown ? 0 : root.batteryLevel / 100
     onIsChargingChanged:   progressRing.requestPaint()
     onRingColorChanged:    progressRing.requestPaint()
