@@ -119,6 +119,9 @@ bool BleManager::isScanning() const
 
 void BleManager::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 {
+    // Ignore les appareils trop lointains (RSSI < -60 dBm signifie > ~10 m)
+    if (info.rssi() != 0 && info.rssi() < -60) return;
+
     // Check for Apple's manufacturer ID (0x004C)
     if (info.manufacturerData().contains(0x004C))
     {
@@ -172,10 +175,10 @@ void BleManager::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
             // Parse battery levels
             int leftNibble = areValuesFlipped ? (podsBatteryByte >> 4) & 0x0F : podsBatteryByte & 0x0F;
             int rightNibble = areValuesFlipped ? podsBatteryByte & 0x0F : (podsBatteryByte >> 4) & 0x0F;
-            deviceInfo.leftPodBattery = (leftNibble == 15) ? -1 : leftNibble * 10;
-            deviceInfo.rightPodBattery = (rightNibble == 15) ? -1 : rightNibble * 10;
-            int caseNibble = flagsAndCaseBattery & 0x0F; // Extracts lower nibble
-            deviceInfo.caseBattery = (caseNibble == 15) ? -1 : caseNibble * 10;
+            deviceInfo.leftPodBattery  = (leftNibble  == 15) ? -1 : qMin(leftNibble  * 10, 100);
+            deviceInfo.rightPodBattery = (rightNibble == 15) ? -1 : qMin(rightNibble * 10, 100);
+            int caseNibble = flagsAndCaseBattery & 0x0F;
+            deviceInfo.caseBattery     = (caseNibble  == 15) ? -1 : qMin(caseNibble  * 10, 100);
 
             // Parse charging statuses from flags (uper 4 bits of data[7])
             quint8 flags = (flagsAndCaseBattery >> 4) & 0x0F;                                        // Extracts lower nibble
@@ -217,14 +220,14 @@ void BleManager::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 
 void BleManager::onScanFinished()
 {
-    if (discoveryAgent->isActive())
-    {
-        discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
-    }
+    // Relance systématiquement (timeout=0 ne devrait pas finir, mais au cas où)
+    discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
 void BleManager::onErrorOccurred(QBluetoothDeviceDiscoveryAgent::Error error)
 {
     LOG_ERROR("BLE scan error occurred:" << error);
     stopScan();
+    // Relance après 5 s pour récupérer des erreurs transitoires
+    QTimer::singleShot(5000, this, [this]() { startScan(); });
 }

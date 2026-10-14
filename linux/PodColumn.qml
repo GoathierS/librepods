@@ -1,39 +1,38 @@
 import QtQuick 2.15
 
+// Colonne icône + anneau de batterie pour un écouteur ou le boîtier.
 Column {
     id: root
-    property bool inEar: true
-    property string iconSource
-    property int batteryLevel: 0
-    property bool isCharging: false
-    property string indicator: ""
-    property real targetOpacity: inEar ? 1 : 0.5
+    property bool   inEar:      true
+    property string iconSource: ""
+    property int    batteryLevel: 0
+    property bool   isCharging:   false
+    property string indicator:    ""   // "L", "R" ou "" pour le boîtier
 
-    Timer {
-        id: opacityTimer
-        interval: 50
-        onTriggered: root.opacity = root.targetOpacity
-    }
+    readonly property real targetOpacity: inEar ? 1.0 : 0.5
 
-    onInEarChanged: {
-        opacityTimer.restart()
-    }
+    spacing: 4
 
-    spacing: 5
+    Behavior on opacity { NumberAnimation { duration: 200 } }
+
+    onInEarChanged: root.opacity = targetOpacity
+
+    Component.onCompleted: root.opacity = targetOpacity
 
     Image {
-        source: parent.iconSource
-        width: parent.indicator === "" ? 92 : 72
-        height: 72
+        source: root.iconSource
+        width:  root.indicator === "" ? 80 : 60
+        height: 60
         fillMode: Image.PreserveAspectFit
         mipmap: true
-        mirror: parent.indicator === "R"
+        mirror: root.indicator === "R"
         anchors.horizontalCenter: parent.horizontalCenter
     }
 
-    BatteryIndicator {
-        batteryLevel: parent.batteryLevel
-        isCharging: parent.isCharging
-        indicator: parent.indicator
+    BatteryRing {
+        batteryLevel: root.batteryLevel
+        isCharging:   root.isCharging
+        label:        root.indicator   // "L", "R" ou "" → "Case"
+        anchors.horizontalCenter: parent.horizontalCenter
     }
 }

@@ -1,116 +1,90 @@
-pragma ComponentBehavior: Bound
-
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 
+// iOS-style segmented control with a sliding pill indicator.
+// Keyboard navigation: Left/Right arrows, Home/End, digit keys 1-9.
 Control {
     id: root
 
-    // Properties
-    property var model: ["Option 1", "Option 2"] // Default model
+    property var model:        ["Option 1", "Option 2"]
     property int currentIndex: 0
 
-    // Colors using system palette
-    readonly property color backgroundColor: palette.light
-    readonly property color selectedColor: palette.highlight
-    readonly property color textColor: palette.buttonText
-    readonly property color selectedTextColor: palette.highlightedText
-
-    // System palette
-    SystemPalette {
-        id: palette
-    }
-
-    // Internal properties
-    padding: 6
-    implicitHeight: 32
-    // Removed: implicitWidth: Math.max(200, model.length * 100)
-
-    // Set focus policy to enable keyboard navigation
     focusPolicy: Qt.StrongFocus
     activeFocusOnTab: true
 
-    // Styling
+    implicitHeight: 36
+    implicitWidth:  root.model.length * 90
+
     background: Rectangle {
         radius: height / 2
-        color: root.backgroundColor
+        color:  "#3A3A3C"
         border.width: root.activeFocus ? 1 : 0
-        border.color: root.selectedColor
+        border.color: "#0A84FF"
     }
 
-    contentItem: Row {
-        spacing: root.padding
+    contentItem: Item {
+        anchors.fill: parent
 
-        Repeater {
-            model: root.model
+        // ── Sliding pill ──────────────────────────────────────────────────────
+        Rectangle {
+            id: pill
+            y: 2
+            height: parent.height - 4
+            width:  parent.width / root.model.length - 4
+            x:      root.currentIndex * (parent.width / root.model.length) + 2
+            radius: height / 2
+            color:  "#636366"
 
-            delegate: Button {
-                id: segmentButton
-                required property int index
-                required property string modelData
-                text: modelData
-                // Removed: width: (root.availableWidth - (root.model.length - 1) * root.padding) / root.model.length
-                height: root.availableHeight
-                focusPolicy: Qt.NoFocus // Let the root control handle focus
+            Behavior on x {
+                NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+            }
+        }
 
-                // Add explicit text color
-                contentItem: Text {
-                    text: segmentButton.text
-                    font: segmentButton.font
-                    color: root.currentIndex === segmentButton.index ? root.selectedTextColor : root.textColor
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    leftPadding: 2
-                    rightPadding: 2
-                    elide: Text.ElideRight
-                }
+        // ── Segment labels + tap areas ────────────────────────────────────────
+        Row {
+            anchors.fill: parent
 
-                background: Rectangle {
-                    radius: height / 2
-                    color: root.currentIndex === segmentButton.index ? root.selectedColor : "transparent"
-                    border.width: 0
+            Repeater {
+                model: root.model
 
-                    Behavior on color {
-                        ColorAnimation {
-                            duration: 600
-                            easing.type: Easing.OutQuad
-                        }
+                Item {
+                    required property int    index
+                    required property string modelData
+
+                    width:  root.width / root.model.length
+                    height: root.height
+
+                    Text {
+                        anchors.centerIn: parent
+                        text:  modelData
+                        color: root.currentIndex === index ? "#FFFFFF" : "#8E8E93"
+                        font.pixelSize: 13
+                        font.weight: Font.Medium
+                        font.family: "Inter"
+                        elide: Text.ElideRight
                     }
-                }
 
-                onClicked: {
-                    if (root.currentIndex !== index) {
-                        root.currentIndex = index;
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.currentIndex = index
                     }
                 }
             }
         }
     }
 
-    // Handle key events for navigation
     Keys.onPressed: event => {
-        if (event.key === Qt.Key_Left) {
-            if (root.currentIndex > 0) {
-                root.currentIndex--;
-                event.accepted = true;
-            }
-        } else if (event.key === Qt.Key_Right) {
-            if (root.currentIndex < root.model.length - 1) {
-                root.currentIndex++;
-                event.accepted = true;
-            }
+        if (event.key === Qt.Key_Left && root.currentIndex > 0) {
+            root.currentIndex--; event.accepted = true
+        } else if (event.key === Qt.Key_Right && root.currentIndex < root.model.length - 1) {
+            root.currentIndex++; event.accepted = true
         } else if (event.key === Qt.Key_Home) {
-            root.currentIndex = 0;
-            event.accepted = true;
+            root.currentIndex = 0; event.accepted = true
         } else if (event.key === Qt.Key_End) {
-            root.currentIndex = root.model.length - 1;
-            event.accepted = true;
+            root.currentIndex = root.model.length - 1; event.accepted = true
         } else if (event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
-            const index = event.key - Qt.Key_1;
-            if (index <= root.model.length) {
-                root.currentIndex = index;
-                event.accepted = true;
-            }
+            var i = event.key - Qt.Key_1
+            if (i < root.model.length) { root.currentIndex = i; event.accepted = true }
         }
     }
 }

@@ -51,11 +51,14 @@ qt_add_qml_module(librepods
     VERSION 1.0
     QML_FILES
         Main.qml
+        BatteryRing.qml
         BatteryIndicator.qml
+        IOSSwitch.qml
         SegmentedControl.qml
         PodColumn.qml
         Icon.qml
         KeysQRDialog.qml
+        CaseOpenPopup.qml
 )
 
 # Add the resource file
